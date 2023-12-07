@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebSocket Client</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/noUiSlider/14.6.3/nouislider.min.css"/>
+    <style>
+        /* Стили для элемента с сообщением */
+        .message {
+            color: red;
+            margin-bottom: 100px;
+        }
+
+        /* Стили для границ значений */
+        .slider-container {
+            display: flex;
+            align-items: center;
+            margin-bottom: 100px;
+        }
+
+        .slider-values {
+            width: 50px;
+            text-align: center;
+        }
+
+        .slider-bar {
+            flex-grow: 1;
+            margin-left: 10px;
+            margin-right: 10px;
+        }
+    </style>
+</head>
+<body>
+<div class="message"></div>
+<div id="sliders"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/noUiSlider/14.6.3/nouislider.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/wnumb/1.2.0/wNumb.min.js"></script>
+<script>
+    var socket = new WebSocket('ws://localhost:22345');
+    var messageElement = document.querySelector('.message');
+    var slidersElement = document.getElementById('sliders');
+    var sliders = [];
+
+    function serializeData(data) {
+        var serializedData = new Uint8Array(data.length * 2);
+        for (var i = 0; i < data.length; i++) {
+            serializedData[i * 2] = data[i] & 0xFF;
+            serializedData[i * 2 + 1] = (data[i] >> 8) & 0xFF;
+        }
+        return serializedData;
+    }
+
+    function deserializeData(data) {
+        var deserializedData = [];
+        for (var i = 0; i < data.length; i += 2) {
+            var value = data[i] | (data[i + 1] << 8);
+            deserializedData.push(value);
+        }
+        return deserializedData;
+    }
+
+    socket.binaryType = 'arraybuffer';
+
+    function clearSliders() {
+        sliders.forEach(function (slider) {
+            slider.destroy();
+        });
+        sliders = [];
+        slidersElement.innerHTML = '';
+    }
+
+    function onClientConnect() {
+        console.log('WebSocket connection opened');
+        clearSliders();
+        socket.send('request_data');
+    }
+
+    socket.onopen = onClientConnect;
+
+    socket.onmessage = function (event) {
+        var messageData = new Uint8Array(event.data);
+
+        if (messageData[0] === 0) {
+            var initialData = deserializeData(messageData.subarray(1));
+            createSliders(initialData);
+        } else if (messageData[0] === 1) {
+            var updatedData = deserializeData(messageData.subarray(1));
+            updateSliders(updatedData);
+        }
+    };
+
+    socket.onerror = function () {
+        console.log('WebSocket connection error');
+        // Удаление предыдущих ползунков
+        clearSliders();
+        // Создание случайных значений
+        var randomData = [];
+        for (var i = 0; i < 10; i++) {
+            randomData.push(0);
+        }
+        createSliders(randomData);
+        messageElement.textContent = 'Не удалось установить соединение с сервером'; // Вывод сообщения об ошибке
+    };
+
+    socket.onclose = function () {
+        console.log('WebSocket connection closed');
+    };
+
+    function createSliders(data) {
+    data.forEach(function (value) {
+        var sliderContainer = document.createElement('div');
+        sliderContainer.className = 'slider-container';
+        slidersElement.appendChild(sliderContainer);
+
+        var sliderValues = document.createElement('div');
+        sliderValues.className = 'slider-values';
+        sliderValues.textContent = value.toString();
+        sliderContainer.appendChild(sliderValues);
+
+        var sliderBar = document.createElement('div');
+        sliderBar.className = 'slider-bar';
+        sliderContainer.appendChild(sliderBar);
+
+        var sliderElement = document.createElement('div');
+        sliderBar.appendChild(sliderElement);
+
+
+
+
+        var slider = noUiSlider.create(sliderElement, {
+            range: {
+                'min': 0,
+                'max': 100
+            },
+            start: value,
+            tooltips: wNumb({decimals: 0}) // Добавление числовых диапазонов
+        });
+
+        slider.on('slide', updateData);
+        sliders.push(slider);
+
+        var sliderValues2 = document.createElement('div');
+        sliderValues2.className = 'slider-values';
+        sliderValues2.textContent = '100';
+        sliderContainer.appendChild(sliderValues2);
+    });
+}
+
+    function updateSliders(data) {
+        for (var i = 0; i < data.length; i++) {
+            sliders[i].set(data[i]);
+        }
+    }
+
+    function updateData(values, handle, unencoded) {
+        var updatedData = unencoded.map(function (value) {
+            return parseInt(value);
+        });
+        var serializedData = new DataView(new ArrayBuffer(updatedData.length * 2));
+        updatedData.forEach(function (value, index) {
+            serializedData.setInt16(index * 2, value, true);
+        });
+        var updatedDataBytes = new Uint8Array(serializedData.buffer); // Преобразовываем в бинарный формат
+        socket.send(updatedDataBytes);
+    }
+</script>
+</body>
+</html>
